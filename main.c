@@ -38,15 +38,11 @@ int main(void)
     file_ptr = fopen("processos.txt", "r");
     while ((c = fgetc(file_ptr)) != EOF)
     {
-        if (isdigit(c))
+        if (isdigit(c)) // essa gambiarrazinha é só pra ler o primeiro char
         {
-            ungetc(c, file_ptr); // Put the digit back into the stream
-            if (fscanf(file_ptr, "%d\n", &num_processes) == 1)
-            {
-                // Successfully read the first number
-                printf("quantidade de processos: %d\n", num_processes);
-                break;
-            }
+            fseek(file_ptr, -1, SEEK_CUR);
+            fscanf(file_ptr, "%d\n", &num_processes);
+            break;
         }
     }
     // printf("quantidade de processos: %d\nProcesso #%d - %dKb\n", num_processes, process_number, memory_size);
@@ -54,6 +50,7 @@ int main(void)
 
     return 0;
 }
+
 void init_queue(queue *q) { q->head = NULL, q->tail = NULL; }
 
 int is_queue_empty(queue *q) { return (q->head == NULL); }
