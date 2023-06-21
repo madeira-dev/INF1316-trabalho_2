@@ -42,6 +42,8 @@ int main(void)
     init_queue(ready_queue);
     init_queue(blocked_queue);
 
+    printf("lendo processos:\n");
+    printf("\n");
     file_ptr = fopen("processos.txt", "r");
     while ((c = fgetc(file_ptr)) != EOF)
     {
@@ -70,6 +72,9 @@ int main(void)
             }
             // criando processo na fila de prontos
             enqueue(ready_queue, process_number, memory_size, info_number, exec_time, pid, io_time);
+            printf("fila de prontos:\n");
+            print_queue(ready_queue);
+            printf("\n");
 
             // reset values
             for (i = 0; i < 5; i++)
@@ -78,12 +83,24 @@ int main(void)
                 exec_time[i] = -1;
             }
         }
+        sleep(1);
     }
-    print_queue(ready_queue);
     fclose(file_ptr);
+    printf("fila de prontos no final:\n");
+    print_queue(ready_queue);
 
     // salvando quantidade de processos
     num_processes = count_process_number(ready_queue);
+
+    printf("\n%d processos carregados\n", num_processes);
+    sleep(1);
+    printf("memoria total para ser usada: 16Kb\n");
+    sleep(1);
+
+    // a partir daqui é o gerenciamento da memoria para os processos
+    // implementacao dos algoritmos de First fit Best fit e Worst fit
+
+    // first fit
 
     return 0;
 }
