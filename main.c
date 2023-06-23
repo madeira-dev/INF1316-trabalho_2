@@ -43,7 +43,7 @@ int main(void)
     char c;
     int num_processes, process_number, memory_size, info_number;
     int exec_time[5] = {DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE}, pid = DEFAULT_VALUE, io_time[5] = {DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE}, op_order[5] = {DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE}, i;
-    int count_exec = 0, count_io = 0, read_info = 0, op_type;
+    int count_exec = 0, count_io = 0, read_info = 0, op_type, parent_pid = getpid();
     queue *ready_queue = (queue *)malloc(sizeof(queue));   // fila de prontos
     queue *blocked_queue = (queue *)malloc(sizeof(queue)); // fila de processos bloqueados por operacao I/O
     queue *ended_queue = (queue *)malloc(sizeof(queue));   // fila para processos que ja terminaram sua execucao
@@ -139,7 +139,13 @@ int main(void)
 
             // alocar para o processo curr_op_index
             printf("\trealizando operacao exec com duracao total de %d segundos\n", current_process->exec_time[curr_op_index]);
-            sleep(TIME_SLICE);
+            if (current_process->exec_time[curr_op_index] >= TIME_SLICE)
+            {
+                sleep(TIME_SLICE);
+                printf("\t%d segundos restantes\n", (current_process->exec_time[curr_op_index] - TIME_SLICE));
+            }
+            else
+                sleep(TIME_SLICE - current_process->exec_time[curr_op_index]);
 
             // atualizar tempo restante de execucao
             current_process->exec_time[curr_op_index] -= TIME_SLICE;
@@ -171,8 +177,48 @@ int main(void)
                 else if (current_process->op_order[next_op_index] == 2) // io
                 {
                     printf("\tDEBUG proxima operacao=io\n");
-                    // aqui provavelmente um fork pra poder fazer em paralelo
-                    enqueue(blocked_queue, current_process->process_number, current_process->memory_size, current_process->info_number, current_process->exec_time, current_process->pid, current_process->io_time, current_process->op_order);
+                    current_process->io_time[curr_op_index] = DEFAULT_VALUE; // voltando ao valor padrao para nao considerar a mesma operacao novamente
+                    for (i = 0; i < 5; i++)                                  // tambem voltando ao valor padrao
+                    {
+                        if (current_process->op_order[i] == 2)
+                        {
+                            current_process->op_order[i] = DEFAULT_VALUE;
+                            break;
+                        }
+                    }
+
+                    // pid = fork();
+                    // if (pid == 0) // filho
+                    // {
+                    // queue_node *tmp_node = (queue_node *)malloc(sizeof(queue_node));
+                    // printf("\tIO: enviando operacao io para fila de bloqueados\n");
+                    // printf("\tIO: processo na fila de bloqueados por %d segundos\n", current_process->io_time[curr_op_index]);
+                    // enqueue(blocked_queue, current_process->process_number, current_process->memory_size, current_process->info_number, current_process->exec_time, current_process->pid, current_process->io_time, current_process->op_order);
+
+                    // sleep(current_process->io_time[curr_op_index]);
+
+                    // tmp_node = dequeue(blocked_queue);
+
+                    // printf("\tIO: operacao io terminou, voltando com o processo para a fila de prontos\n");
+                    // current_process->io_time[curr_op_index] = DEFAULT_VALUE; // voltando ao valor padrao para nao considerar a mesma operacao novamente
+                    // for (i = 0; i < 5; i++)                                  // tambem voltando ao valor padrao
+                    // {
+                    //     if (current_process->op_order[i] == 2)
+                    //     {
+                    //         current_process->op_order[i] = DEFAULT_VALUE;
+                    //         break;
+                    //     }
+                    // }
+
+                    enqueue(ready_queue, current_process->process_number, current_process->memory_size, current_process->info_number, current_process->exec_time, current_process->pid, current_process->io_time, current_process->op_order);
+
+                    printf("prontos:\n");
+                    print_queue(ready_queue);
+                    printf("bloqueados\n");
+                    print_queue(blocked_queue);
+
+                    // exit(0);
+                    // }
                 }
                 else // terminou todas as operacoes
                 {
@@ -188,17 +234,21 @@ int main(void)
                 enqueue(ready_queue, current_process->process_number, current_process->memory_size, current_process->info_number, current_process->exec_time, current_process->pid, current_process->io_time, current_process->op_order);
             }
         }
-        else if (op_type == 2) // io
-        {
-            // mandar processo para a fila de bloqueados pelo tempo do io
-            // aqui tambem devo precisar usar fork para deixar em paralelo
-            printf("\toperacao io a ser realizada, enviando para a fila de bloqueados por %d segundos", current_process->io_time[get_op_index(current_process, op_type)]);
-        }
+        // else if (op_type == 2) // io
+        // {
+        //     // mandar processo para a fila de bloqueados pelo tempo do io
+        //     // aqui tambem devo precisar usar fork para deixar em paralelo
+        //     printf("\toperacao io a ser realizada, enviando para a fila de bloqueados por %d segundos", current_process->io_time[get_op_index(current_process, op_type)]);
+        // }
         else
             puts("tipo de operacao invalido");
         printf("\n");
     }
     printf("execucao dos processos finalizadas\n");
+    free_queue(ready_queue);
+    free_queue(blocked_queue);
+    free_queue(ended_queue);
+    free(current_process);
 
     /* executar o primeiro processo da fila de prontos, apos terminar toda sua execucao, verificar
     se proxima operacao é io, se for io colocar na fila de bloqueados pelo tempo indicado

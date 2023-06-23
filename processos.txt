@@ -8,7 +8,6 @@ Processo #2 - 5Kb
 1
 exec 5
 Processo #3 - 8Kb
-3
+2
 exec 5
-io 4
 exec 4
