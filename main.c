@@ -5,6 +5,8 @@
 
 #define MAX_PROGRAM_NAME_LEN 20
 #define TOTAL_MEMORY 16
+#define TIME_SLICE 4
+#define DEFAULT_VALUE -1
 
 typedef struct _queue // fila de processos
 {
@@ -20,7 +22,7 @@ typedef struct _queue_node // processos
     int exec_time[5];   /* array de tempos de execucao ja q pode ter mais um uma operacao de execucao */
     int pid;            /* id do processo */
     int io_time[5];     /* array de tempos de operacao io ja q pode ter mais de uma operacao io */
-    int op_order[5];    /* array para indicar a ordem de execucao de cada operacao (exec ou io)*/
+    int op_order[5];    /* array para indicar a ordem de execucao de cada operacao (exec ou io) */
     struct _queue_node *next;
 } queue_node;
 
@@ -32,25 +34,26 @@ void print_queue(queue *q);
 void free_queue(queue *q);
 int count_process_number(queue *q);
 int check_partition_size(int memory_required);
+int get_op_type(queue_node *current_process);
+int get_op_index(queue_node *current_process, int op_type);
 
 int main(void)
 {
     FILE *file_ptr;
     char c;
     int num_processes, process_number, memory_size, info_number;
-    int exec_time[5] = {-1, -1, -1, -1, -1}, pid = -1, io_time[5] = {-1, -1, -1, -1, -1}, op_order[5] = {-1, -1, -1, -1, -1}, i;
-    int count_exec = 0, count_io = 0, read_info = 0;
-    int op_num = 0;
+    int exec_time[5] = {DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE}, pid = DEFAULT_VALUE, io_time[5] = {DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE}, op_order[5] = {DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE}, i;
+    int count_exec = 0, count_io = 0, read_info = 0, op_type;
     queue *ready_queue = (queue *)malloc(sizeof(queue));   // fila de prontos
     queue *blocked_queue = (queue *)malloc(sizeof(queue)); // fila de processos bloqueados por operacao I/O
     queue *ended_queue = (queue *)malloc(sizeof(queue));   // fila para processos que ja terminaram sua execucao
     queue_node *current_process = (queue_node *)malloc(sizeof(queue_node));
+
     init_queue(ready_queue);
     init_queue(blocked_queue);
     init_queue(ended_queue);
 
     printf("lendo processos:\n");
-    printf("\n");
     file_ptr = fopen("processos.txt", "r");
     while ((c = fgetc(file_ptr)) != EOF)
     {
@@ -74,7 +77,7 @@ int main(void)
                         count_io += 1;
                     }
                 }
-                // reset values
+                // resetando valores
                 read_info = 0;
                 count_exec = 0;
                 count_io = 0;
@@ -82,21 +85,21 @@ int main(void)
             // criando processo na fila de prontos
             enqueue(ready_queue, process_number, memory_size, info_number, exec_time, pid, io_time, op_order);
 
-            // reset values
+            // resetando valores
             for (i = 0; i < 5; i++)
             {
-                io_time[i] = -1;
-                exec_time[i] = -1;
-                op_order[i] = -1;
+                io_time[i] = DEFAULT_VALUE;
+                exec_time[i] = DEFAULT_VALUE;
+                op_order[i] = DEFAULT_VALUE;
             }
         }
-        sleep(1);
     }
     fclose(file_ptr);
+    sleep(1);
 
     // salvando quantidade de processos
     num_processes = count_process_number(ready_queue);
-    printf("\n%d processos carregados\n", num_processes);
+    printf("\nprocessos carregados: %d\n", num_processes);
     sleep(1);
     printf("fila de prontos:\n");
     print_queue(ready_queue);
@@ -105,10 +108,9 @@ int main(void)
     // implementacao dos algoritmos de First fit Best fit e Worst fit
 
     // first fit
-    /* (por quanto tempo um processo fica bloqueado depois da operacao IO???? vou deixar por 4 segundos por enquanto) */
-
     // dequeue no primeiro processo e verificar primeira operacao
     printf("\nmemoria total: %dKb\nparticoes de 2Kb, 4Kb e 8Kb\n", TOTAL_MEMORY);
+    printf("time slice de execucao: %d segundos\n", TIME_SLICE);
     printf("\n<-Algoritmo First Fit->\n");
 
     while (count_process_number(ended_queue) != num_processes)
@@ -123,28 +125,96 @@ int main(void)
         // buscando primeira particao que possua o tamanho necessario de memoria
         if (check_partition_size(current_process->memory_size) != -1)
             printf("\tparticao a ser utilizada para o processo: %dKb\n", check_partition_size(current_process->memory_size));
-        else
+        else // acho que dentro desse else na verdade precisa ter os casos de dividir ou dobrar as particoes
         {
             printf("\tnenhuma particao encontrada\n");
             exit(1);
         }
 
-        printf("verificando operacao a ser realizada pelo processo...\n");
-        if (get_op_type(current_process) == 1)
-        { // exec
-          // alocar para o processo do index de get_op_index
+        op_type = get_op_type(current_process); // pegando valor que indica operacao a ser realizada
+        printf("\tverificando operacao a ser realizada pelo processo...\n");
+        if (op_type == 1) // exec
+        {
+            int curr_op_index = get_op_index(current_process, op_type); // index da operacao a ser executada
+
+            // alocar para o processo curr_op_index
+            printf("\trealizando operacao exec com duracao total de %d segundos\n", current_process->exec_time[curr_op_index]);
+            sleep(TIME_SLICE);
+
+            // atualizar tempo restante de execucao
+            current_process->exec_time[curr_op_index] -= TIME_SLICE;
+
+            // verificar se acabou seu tempo de execucao total
+            if (current_process->exec_time[curr_op_index] <= 0)
+            {
+                printf("\tDEBUG acabou de executar tudo\n");
+                // como operacao terminou, voltando para valor padrao
+                current_process->exec_time[curr_op_index] = DEFAULT_VALUE;
+
+                for (i = 0; i < 5; i++)
+                {
+                    if (current_process->op_order[i] == op_type)
+                    {
+                        current_process->op_order[i] = DEFAULT_VALUE;
+                        break;
+                    }
+                }
+
+                int next_op_index = curr_op_index + 1;
+
+                // verifica proxima operacao
+                if (current_process->op_order[next_op_index] == 1) // exec
+                {
+                    printf("\tDEBUG proxima operacao=exec\n");
+                    enqueue(ready_queue, current_process->process_number, current_process->memory_size, current_process->info_number, current_process->exec_time, current_process->pid, current_process->io_time, current_process->op_order);
+                }
+                else if (current_process->op_order[next_op_index] == 2) // io
+                {
+                    printf("\tDEBUG proxima operacao=io\n");
+                    // aqui provavelmente um fork pra poder fazer em paralelo
+                    enqueue(blocked_queue, current_process->process_number, current_process->memory_size, current_process->info_number, current_process->exec_time, current_process->pid, current_process->io_time, current_process->op_order);
+                }
+                else // terminou todas as operacoes
+                {
+                    printf("\tDEBUG proxima operacao=nenhuma\n");
+                    enqueue(ended_queue, current_process->process_number, current_process->memory_size, current_process->info_number, current_process->exec_time, current_process->pid, current_process->io_time, current_process->op_order);
+                }
+            }
+
+            // nao acabou tempo total de execucao
+            else // mandando para o final da fila de prontos
+            {
+                printf("\tDEBUG nao acabou de executar tudo\n");
+                enqueue(ready_queue, current_process->process_number, current_process->memory_size, current_process->info_number, current_process->exec_time, current_process->pid, current_process->io_time, current_process->op_order);
+            }
+        }
+        else if (op_type == 2) // io
+        {
+            // mandar processo para a fila de bloqueados pelo tempo do io
+            // aqui tambem devo precisar usar fork para deixar em paralelo
+            printf("\toperacao io a ser realizada, enviando para a fila de bloqueados por %d segundos", current_process->io_time[get_op_index(current_process, op_type)]);
         }
         else
-        { // io
-          // alocar para o processo do index de get_op_index
-        }
+            puts("tipo de operacao invalido");
+        printf("\n");
     }
+    printf("execucao dos processos finalizadas\n");
 
-    /* executar dada operacao por no maximo 4 unidades de tempo, descontar esse
-    tempo que passou do tempo total que a operacao precisa e mandar o processo
-    para o final da fila */
+    /* executar o primeiro processo da fila de prontos, apos terminar toda sua execucao, verificar
+    se proxima operacao é io, se for io colocar na fila de bloqueados pelo tempo indicado
+    no arquivo e ir para o proximo processo, se nao for io apenas passar para o proximo processo
+    */
 
-    // dequeue no novo primeiro processo e seguir com o passo anterior para este processo
+    /* depois de executar P1, vai pro proximo processo se tiver algum na fila de pronto */
+    /* pode repetir a particao depois de usar (o que acontece com oq resta??) */
+    /* o processo fica na fila de bloqueados pelo tempo que o IO precisar, nao considera o time slice de 4 */
+    /* se dois processos voltarem juntos para a fila de prontos, o que voltou da fila de bloqueados tem prioridade */
+
+    /* depois de terminar o exec de um programa, verificar se operacao seguinte é de io, se for, manda pra
+    fila de bloqueados pelo tempo de io indicado no arquivo, se nao, vai pro final da fila de prontos */
+
+    /* adicionar campo na struct de processo indicando a operacao anterior para adicionar prioridade
+    para aqueles que estiverem voltando de io */
 
     return 0;
 }
@@ -274,9 +344,10 @@ int get_op_type(queue_node *current_process)
 
     for (index = 0; index < 5; index++)
     {
-        if (current_process->op_order[index] != -1)
+        if (current_process->op_order[index] != DEFAULT_VALUE)
             return current_process->op_order[index]; // retorna primeiro valor indicando o tipo de operacao
     }
+    return DEFAULT_VALUE;
 }
 
 int get_op_index(queue_node *current_process, int op_type)
@@ -289,7 +360,7 @@ int get_op_index(queue_node *current_process, int op_type)
     {
         for (index = 0; index < 5; index++)
         {
-            if (current_process->exec_time[index] != -1) // buscando proxima operacao exec nao terminada
+            if (current_process->exec_time[index] != DEFAULT_VALUE) // buscando proxima operacao exec nao terminada
                 return index;
         }
     }
@@ -297,8 +368,9 @@ int get_op_index(queue_node *current_process, int op_type)
     {
         for (index = 0; index < 5; index++)
         {
-            if (current_process->io_time[index] != -1) // buscando proxima operacao io nao terminada
+            if (current_process->io_time[index] != DEFAULT_VALUE) // buscando proxima operacao io nao terminada
                 return index;
         }
     }
+    return DEFAULT_VALUE;
 }
