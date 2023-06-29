@@ -49,7 +49,9 @@ queue_node *dequeue(queue *q);
 void print_queue(queue *q);
 void free_queue(queue *q);
 int count_process_number(queue *q);
-int check_partition_size(int memory_required);
+void get_partition_size_first_fit(int memory_required, int partitions[]);
+void get_partition_size_best_fit(int memory_required, int partitions[]);
+void get_partition_size_worst_fit(int memory_required, int partitions[]);
 int get_op_type(queue_node *current_process);
 int get_op_index(queue_node *current_process, int op_type);
 void *io_thread_func(void *arg);
@@ -60,7 +62,8 @@ int main(void)
     char c;
     int num_processes, process_number, memory_size, info_number;
     int exec_time[5] = {DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE}, pid = DEFAULT_VALUE, io_time[5] = {DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE}, op_order[5] = {DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE}, i;
-    int count_exec = 0, count_io = 0, read_info = 0, op_type /* indica qual operacao a ser executada */, parent_pid = getpid();
+    int count_exec = 0, count_io = 0, read_info = 0, op_type /* indica qual operacao a ser executada */;
+    int partitions[3] = {0, 4, 0};
     queue *ready_queue = (queue *)malloc(sizeof(queue));   // fila de prontos
     queue *blocked_queue = (queue *)malloc(sizeof(queue)); // fila de processos bloqueados por operacao I/O
     queue *ended_queue = (queue *)malloc(sizeof(queue));   // fila para processos que ja terminaram sua execucao
@@ -122,14 +125,12 @@ int main(void)
     print_queue(ready_queue);
     sleep(1);
 
-    // a partir daqui é o gerenciamento da memoria para os processos
-    // implementacao dos algoritmos de First fit Best fit e Worst fit
-
     // first fit
     // dequeue no primeiro processo e verificar primeira operacao
-    printf("\nmemoria total: %dKb\nparticoes de 2Kb, 4Kb e 8Kb\n", TOTAL_MEMORY);
+    printf("\nmemoria total: %dKb\nparticoes iniciais: 4 de 4Kb\n", TOTAL_MEMORY);
     printf("time slice de execucao: %d segundos\n", TIME_SLICE);
     printf("\n<-Algoritmo First Fit->\n");
+    printf("\tparticoes: 2Kb:[%d] 4Kb:[%d] 8Kb:[%d]\n", partitions[0], partitions[1], partitions[2]);
 
     while (count_process_number(ended_queue) != num_processes)
     {
@@ -141,13 +142,7 @@ int main(void)
         sleep(1);
 
         // buscando primeira particao que possua o tamanho suficiente de memoria
-        if (check_partition_size(current_process->memory_size) != -1)
-            printf("\tparticao a ser utilizada para o processo: %dKb\n", check_partition_size(current_process->memory_size));
-        else // acho que dentro desse else na verdade precisa ter os casos de dividir ou dobrar as particoes
-        {
-            printf("\tnenhuma particao encontrada\n");
-            exit(1);
-        }
+        get_partition_size_worst_fit(current_process->memory_size, partitions);
 
         op_type = get_op_type(current_process); // pegando valor que indica operacao a ser realizada
         printf("\tverificando operacao a ser realizada pelo processo...\n");
@@ -247,19 +242,6 @@ int main(void)
     free_queue(blocked_queue);
     free_queue(ended_queue);
     free(current_process);
-
-    /* executar o primeiro processo da fila de prontos, apos terminar toda sua execucao, verificar
-    se proxima operacao é io, se for io colocar na fila de bloqueados pelo tempo indicado
-    no arquivo e ir para o proximo processo, se nao for io apenas passar para o proximo processo
-    */
-
-    /* depois de executar P1, vai pro proximo processo se tiver algum na fila de pronto */
-    /* pode repetir a particao depois de usar (o que acontece com oq resta??) */
-    /* o processo fica na fila de bloqueados pelo tempo que o IO precisar, nao considera o time slice de 4 */
-    /* se dois processos voltarem juntos para a fila de prontos, o que voltou da fila de bloqueados tem prioridade */
-
-    /* depois de terminar o exec de um programa, verificar se operacao seguinte é de io, se for, manda pra
-    fila de bloqueados pelo tempo de io indicado no arquivo, se nao, vai pro final da fila de prontos */
 
     /* adicionar campo na struct de processo indicando a operacao anterior para adicionar prioridade
     para aqueles que estiverem voltando de io */
@@ -376,14 +358,200 @@ int count_process_number(queue *q)
     return count;
 }
 
-int check_partition_size(int memory_required)
+void get_partition_size_first_fit(int memory_required, int partitions[])
 {
-    int partitions[3] = {2, 4, 8}, i;
+    if (memory_required <= 2)
+    {
+        if (partitions[0] >= 1)
+        {
+            printf("alocou :) 2kb de memoria usou 1 particao de 2kb\n");
+        }
+        else if (partitions[1] >= 1)
+        {
+            printf("alocou :) 2kb de memoria usou 1 particao de 4kb\n");
+        }
+        else if (partitions[2] >= 1)
+        {
+            printf("alocou :) 2kb de memoria usou 1 particao de 8kb\n");
+        }
+    }
 
-    for (i = 0; i < 3; i++)
-        if (partitions[i] >= memory_required)
-            return partitions[i];
-    return -1;
+    else if (memory_required <= 4)
+    {
+        if (partitions[1] >= 1)
+        {
+            printf("alocou :) 4kb de memoria usou 1 particao de 4kb \n");
+        }
+        else if (partitions[2] >= 1)
+        {
+            printf("alocou :) 4kb de memoria usou 1 particao de 8kb\n");
+        }
+        else // caso so tenha particao de dois
+        {
+            partitions[0] -= 2;
+            partitions[1] += 1;
+            printf("alocou :) 4kb de memoria usou 2 particoes de 2kb\n");
+        }
+    }
+
+    else if (memory_required <= 8)
+    {
+        if (partitions[2] >= 1)
+        {
+            printf("alocou :) 8kb de memoria usou 1 particao de 8kb \n");
+        }
+        else if (partitions[1] >= 2)
+        {
+            partitions[1] -= 2;
+            partitions[2] += 1;
+            printf("alocou :) 8kb de memoria usou 2 particoes de 4kb\n");
+        }
+        else
+        {
+            partitions[0] -= 4;
+            partitions[2] += 1;
+            printf("alocou :) 8kb de memoria usou 4 particoes de 2kb\n");
+        }
+    }
+    else
+    {
+
+        printf("alocou :) 16kb de memoria usou %d particoes de 2kb, %d particoes de 4kb e %d particoes de 8kb \n", partitions[0], partitions[1], partitions[2]);
+        partitions[0] = 0;
+        partitions[1] = 0;
+        partitions[2] = 2;
+    }
+    printf("particoes de 2: [%d]; particoes de 4:[%d]; particoes de 8:[%d]\n", partitions[0], partitions[1], partitions[2]);
+}
+
+void get_partition_size_best_fit(int memory_required, int partitions[])
+{
+    // processo precisa de no maximo 2Kb
+    if (memory_required <= 2)
+    {
+        // verifico quantidade de particoes de tamanho 2
+        if (partitions[0] >= 1)
+        {
+            // otimo joia sucesso
+            printf("alocou :) usou 2Kb ja tinha particao de 2kb\n");
+        }
+        else
+        {
+            if (partitions[1] >= 1)
+            {
+                // quebra 1 de 4 em 2 de 2
+                partitions[1] -= 1;
+                partitions[0] += 2;
+                printf("alocou :) usou 2Kb quebrou 4kb em 2 particoes de 2kb\n");
+            }
+            else
+            {
+                // quebra 1 de 8 em 2 de 2
+                partitions[2] -= 1; // quebra 1 particao em 2 de 4
+                partitions[1] += 1; // quebra 1 das particoes em 2 de 2
+                partitions[0] += 2;
+                printf("alocou :) usou 2Kb quebrou 8kb em 2 particoes de 2kb\n");
+            }
+        }
+    }
+
+    // processo precisa de no maximo 4Kb
+    else if (memory_required <= 4)
+    {
+        // verificar quantidade de particoes de tamanho 4
+        if (partitions[1] >= 1)
+        {
+            printf("alocou :) usou 4Kb ja tinha particao de 4kb\n");
+        }
+        else if (partitions[2] >= 1)
+        {
+            partitions[2] -= 1;
+            partitions[1] += 2;
+            printf("alocou :) usou 4Kb quebrou 8kb em 2 particoes de 4kb\n");
+        }
+        else // juntar particoes de 2 em uma de 4
+        {
+            partitions[0] -= 2;
+            partitions[1] += 1;
+            printf("alocou :) usou 4Kb juntou 2 particoes de 2kb em 1 de 4kb\n");
+        }
+    }
+
+    // processo precisa de mais de 4Kb
+    else if (memory_required <= 8)
+    {
+        // verificar quantidade de particoes de tamanho 8
+        if (partitions[2] >= 1)
+        {
+            // otimo joia sucesso
+            printf("alocou :) usou 8Kb ja tinha particao de 8kb\n");
+        }
+        // verificar quantidade de particoes de tamanho 4
+        else if (partitions[1] >= 2)
+        {
+            partitions[1] -= 2;
+            partitions[2] += 1;
+            printf("alocou :) usou 8Kb juntou 2 particoes de 4kb em 1 de 8kb\n");
+        }
+        else
+        {
+            partitions[0] -= 4;
+            partitions[2] += 1;
+            printf("alocou :) usou 8Kb juntou 4 particoes de 2kb em 1 de 8kb \n");
+        }
+    }
+    else
+    {
+        printf("alocou :) usou 16kb juntou %d particoes de 2kb, %d particoes de 4kb e %d particoes de 8kb para usar os 16kb\n", partitions[0], partitions[1], partitions[2]);
+        partitions[0] = 0;
+        partitions[1] = 0;
+        partitions[2] = 2;
+    }
+    printf("particoes de 2: [%d]; particoes de 4:[%d]; particoes de 8:[%d]\n", partitions[0], partitions[1], partitions[2]);
+}
+
+void get_partition_size_worst_fit(int memory_required, int partitions[])
+{
+    if (memory_required <= 8)
+    {
+        if (partitions[2] >= 1)
+        {
+            printf("usou 8kb ja tinha uma particao de 8kb\n");
+        }
+        else
+        {
+            int partition_2_in_use = partitions[0];
+            int partition_4_in_use = partitions[1];
+
+            if (partition_2_in_use * 2 >= 8)
+            {
+                partitions[0] -= 4; // diminui 8 Kb das particoes de 2
+                partitions[2] += 1; // aumenta 8 Kb nas particoes de 8
+                printf("usou 8kb juntou 4 particoes de 2kb\n");
+            }
+            else if (partition_4_in_use * 4 >= 8)
+            {
+                partitions[1] -= 2; // diminui 8 Kb das particoes de 4
+                partitions[2] += 1; // aumenta 8 Kb nas particoes de 8
+                printf("usou 8kb juntou 2 particoes de 4kb\n");
+            }
+        }
+    }
+    else
+    {
+        if (partitions[2] == 2)
+        {
+            printf("usou 16kb ja tinham 2 particoes de 8kb\n");
+        }
+        else
+        {
+            printf("usou 16kb juntou %d particoes de 2kb, %d particoes de 4kb e %d particoes de 8kb para usar 16kb\n", partitions[0], partitions[1], partitions[2]);
+            partitions[0] = 0;
+            partitions[1] = 0;
+            partitions[2] = 2;
+        }
+    }
+    printf("particoes de 2: [%d]; particoes de 4:[%d]; particoes de 8:[%d]\n", partitions[0], partitions[1], partitions[2]);
 }
 
 int get_op_type(queue_node *current_process)
