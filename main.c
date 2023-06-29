@@ -1,7 +1,14 @@
+/*
+    Membros do grupo:
+        Gabriel Madeira 2111471
+        Juliana Pinheiro 2110516
+*/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <pthread.h>
 
 #define MAX_PROGRAM_NAME_LEN 20
 #define TOTAL_MEMORY 16
@@ -26,6 +33,15 @@ typedef struct _queue_node // processos
     struct _queue_node *next;
 } queue_node;
 
+typedef struct _thread_args
+{
+    queue *ready_queue;
+    queue *blocked_queue;
+    queue_node *current_process;
+    int curr_op_index;
+    int next_op_index;
+} thread_args;
+
 void init_queue(queue *q);
 int is_queue_empty(queue *q);
 void enqueue(queue *q, int process_number, int memory_size, int info_number, int exec_time[], int pid, int io_time[], int op_order[]);
@@ -36,6 +52,7 @@ int count_process_number(queue *q);
 int check_partition_size(int memory_required);
 int get_op_type(queue_node *current_process);
 int get_op_index(queue_node *current_process, int op_type);
+void *io_thread_func(void *arg);
 
 int main(void)
 {
@@ -43,7 +60,7 @@ int main(void)
     char c;
     int num_processes, process_number, memory_size, info_number;
     int exec_time[5] = {DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE}, pid = DEFAULT_VALUE, io_time[5] = {DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE}, op_order[5] = {DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE}, i;
-    int count_exec = 0, count_io = 0, read_info = 0, op_type, parent_pid = getpid();
+    int count_exec = 0, count_io = 0, read_info = 0, op_type /* indica qual operacao a ser executada */, parent_pid = getpid();
     queue *ready_queue = (queue *)malloc(sizeof(queue));   // fila de prontos
     queue *blocked_queue = (queue *)malloc(sizeof(queue)); // fila de processos bloqueados por operacao I/O
     queue *ended_queue = (queue *)malloc(sizeof(queue));   // fila para processos que ja terminaram sua execucao
@@ -104,6 +121,7 @@ int main(void)
     printf("fila de prontos:\n");
     print_queue(ready_queue);
     sleep(1);
+
     // a partir daqui é o gerenciamento da memoria para os processos
     // implementacao dos algoritmos de First fit Best fit e Worst fit
 
@@ -122,7 +140,7 @@ int main(void)
         printf("\tbuscando particao para alocar %dKb...\n", current_process->memory_size);
         sleep(1);
 
-        // buscando primeira particao que possua o tamanho necessario de memoria
+        // buscando primeira particao que possua o tamanho suficiente de memoria
         if (check_partition_size(current_process->memory_size) != -1)
             printf("\tparticao a ser utilizada para o processo: %dKb\n", check_partition_size(current_process->memory_size));
         else // acho que dentro desse else na verdade precisa ter os casos de dividir ou dobrar as particoes
@@ -154,6 +172,7 @@ int main(void)
             if (current_process->exec_time[curr_op_index] <= 0)
             {
                 printf("\tDEBUG acabou de executar tudo\n");
+
                 // como operacao terminou, voltando para valor padrao
                 current_process->exec_time[curr_op_index] = DEFAULT_VALUE;
 
@@ -177,53 +196,32 @@ int main(void)
                 else if (current_process->op_order[next_op_index] == 2) // io
                 {
                     printf("\tDEBUG proxima operacao=io\n");
-                    current_process->io_time[curr_op_index] = DEFAULT_VALUE; // voltando ao valor padrao para nao considerar a mesma operacao novamente
-                    for (i = 0; i < 5; i++)                                  // tambem voltando ao valor padrao
-                    {
-                        if (current_process->op_order[i] == 2)
-                        {
-                            current_process->op_order[i] = DEFAULT_VALUE;
-                            break;
-                        }
-                    }
 
-                    // pid = fork();
-                    // if (pid == 0) // filho
-                    // {
-                    // queue_node *tmp_node = (queue_node *)malloc(sizeof(queue_node));
-                    // printf("\tIO: enviando operacao io para fila de bloqueados\n");
-                    // printf("\tIO: processo na fila de bloqueados por %d segundos\n", current_process->io_time[curr_op_index]);
-                    // enqueue(blocked_queue, current_process->process_number, current_process->memory_size, current_process->info_number, current_process->exec_time, current_process->pid, current_process->io_time, current_process->op_order);
+                    printf("\tIO: enviando processo com operacao io para a fila de bloqueados\n");
+                    printf("\tIO: processo na fila de bloqueados por %d segundos\n", current_process->io_time[curr_op_index]);
+                    enqueue(blocked_queue, current_process->process_number, current_process->memory_size, current_process->info_number, current_process->exec_time, current_process->pid, current_process->io_time, current_process->op_order);
 
-                    // sleep(current_process->io_time[curr_op_index]);
+                    pthread_t thread_id;
+                    thread_args args;
+                    args.ready_queue = ready_queue;
+                    args.blocked_queue = blocked_queue;
+                    args.current_process = current_process;
+                    args.curr_op_index = curr_op_index;
+                    args.next_op_index = next_op_index;
 
-                    // tmp_node = dequeue(blocked_queue);
-
-                    // printf("\tIO: operacao io terminou, voltando com o processo para a fila de prontos\n");
-                    // current_process->io_time[curr_op_index] = DEFAULT_VALUE; // voltando ao valor padrao para nao considerar a mesma operacao novamente
-                    // for (i = 0; i < 5; i++)                                  // tambem voltando ao valor padrao
-                    // {
-                    //     if (current_process->op_order[i] == 2)
-                    //     {
-                    //         current_process->op_order[i] = DEFAULT_VALUE;
-                    //         break;
-                    //     }
-                    // }
-
-                    enqueue(ready_queue, current_process->process_number, current_process->memory_size, current_process->info_number, current_process->exec_time, current_process->pid, current_process->io_time, current_process->op_order);
-
-                    printf("prontos:\n");
-                    print_queue(ready_queue);
-                    printf("bloqueados\n");
-                    print_queue(blocked_queue);
-
-                    // exit(0);
-                    // }
+                    pthread_create(&thread_id, NULL, io_thread_func, (void *)&args);
                 }
+
                 else // terminou todas as operacoes
                 {
                     printf("\tDEBUG proxima operacao=nenhuma\n");
                     enqueue(ended_queue, current_process->process_number, current_process->memory_size, current_process->info_number, current_process->exec_time, current_process->pid, current_process->io_time, current_process->op_order);
+                    printf("prontos:\n");
+                    print_queue(ready_queue);
+                    printf("bloqueados:\n");
+                    print_queue(blocked_queue);
+                    printf("finalizados:\n");
+                    print_queue(ended_queue);
                 }
             }
 
@@ -423,4 +421,34 @@ int get_op_index(queue_node *current_process, int op_type)
         }
     }
     return DEFAULT_VALUE;
+}
+
+void *io_thread_func(void *arg)
+{
+    thread_args *args = (thread_args *)arg;
+    queue_node *tmp_node = (queue_node *)malloc(sizeof(queue_node));
+
+    queue *ready_queue = args->ready_queue;
+    queue *blocked_queue = args->blocked_queue;
+    queue_node *current_process = args->current_process;
+    int curr_op_index = args->curr_op_index;
+    int next_op_index = args->next_op_index;
+
+    sleep(current_process->io_time[curr_op_index]);
+    printf("\tIO: operacao io terminou, voltando com o processo para a fila de prontos\n");
+    tmp_node = dequeue(blocked_queue);
+
+    tmp_node->io_time[curr_op_index] = DEFAULT_VALUE; // voltando ao valor padrao para nao considerar a mesma operacao novamente
+    for (int i = 0; i < 5; i++)                       // tambem voltando ao valor padrao
+    {
+        if (tmp_node->op_order[i] == tmp_node->op_order[next_op_index])
+        {
+            tmp_node->op_order[i] = DEFAULT_VALUE;
+            break;
+        }
+    }
+
+    enqueue(ready_queue, tmp_node->process_number, tmp_node->memory_size, tmp_node->info_number, tmp_node->exec_time, tmp_node->pid, tmp_node->io_time, tmp_node->op_order);
+
+    pthread_exit(NULL);
 }
