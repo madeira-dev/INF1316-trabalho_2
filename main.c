@@ -296,7 +296,7 @@ int main(int argc, char *argv[])
             // nao acabou tempo total de execucao
             else // mandando para o final da fila de prontos
             {
-                printf("\ttempo da operacao exec nao terminou dentro do time slice\n\tfenviando para final da fila\n");
+                printf("\ttempo da operacao exec nao terminou dentro do time slice\n\tenviando para final da fila\n");
                 enqueue(ready_queue, current_process->process_number, current_process->memory_size, current_process->info_number, current_process->exec_time, current_process->io_time, current_process->op_order, current_process->process_start_time, current_process->process_end_time);
             }
         }
