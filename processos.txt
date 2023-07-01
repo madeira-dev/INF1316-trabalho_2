@@ -1,13 +1,26 @@
+5
+Processo #1 - 7Kb
 4
-Processo #1 - 1Kb
-1
 exec 2
-Processo #2 - 3Kb
-1
-exec 1
-Processo #3 - 5Kb
-1
+io 7
+io 3
+exec 4
+Processo #2 - 5Kb
+5
+io 2
+exec 2
+io 1
+io 4
+exec 7
+Processo #3 - 8Kb
+3
 exec 3
-Processo #4 - 12Kb
+io 7
+io 10
+Processo #4 - 8Kb
 1
-exec 2
+io 15
+Processo #5 - 8Kb
+2
+exec 3
+exec 4

@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <ctype.h>
 #include <pthread.h>
+#include <sys/time.h>
 
 #define MAX_PROGRAM_NAME_LEN 20
 #define TOTAL_MEMORY 16
@@ -27,9 +28,10 @@ typedef struct _queue_node // processos
     int memory_size;    /* quantidade de memoria necessaria para o processo */
     int info_number;    /* numero de informacoes de exec ou io */
     int exec_time[5];   /* array de tempos de execucao ja q pode ter mais um uma operacao de execucao */
-    int pid;            /* id do processo */
     int io_time[5];     /* array de tempos de operacao io ja q pode ter mais de uma operacao io */
     int op_order[5];    /* array para indicar a ordem de execucao de cada operacao (exec ou io) */
+    int process_start_time;
+    int process_end_time;
     struct _queue_node *next;
 } queue_node;
 
@@ -37,14 +39,13 @@ typedef struct _thread_args
 {
     queue *ready_queue;
     queue *blocked_queue;
-    queue_node *current_process;
     int curr_op_index;
     int next_op_index;
 } thread_args;
 
 void init_queue(queue *q);
 int is_queue_empty(queue *q);
-void enqueue(queue *q, int process_number, int memory_size, int info_number, int exec_time[], int pid, int io_time[], int op_order[]);
+void enqueue(queue *q, int process_number, int memory_size, int info_number, int exec_time[], int io_time[], int op_order[], int process_start_time, int process_end_time);
 queue_node *dequeue(queue *q);
 void print_queue(queue *q);
 void free_queue(queue *q);
@@ -61,13 +62,15 @@ int main(void)
     FILE *file_ptr;
     char c;
     int num_processes, process_number, memory_size, info_number;
-    int exec_time[5] = {DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE}, pid = DEFAULT_VALUE, io_time[5] = {DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE}, op_order[5] = {DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE}, i;
+    int exec_time[5] = {DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE}, io_time[5] = {DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE}, op_order[5] = {DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE}, i;
     int count_exec = 0, count_io = 0, read_info = 0, op_type /* indica qual operacao a ser executada */;
+    int start_time = DEFAULT_VALUE, end_time = DEFAULT_VALUE;
     int partitions[3] = {0, 4, 0};
     queue *ready_queue = (queue *)malloc(sizeof(queue));   // fila de prontos
     queue *blocked_queue = (queue *)malloc(sizeof(queue)); // fila de processos bloqueados por operacao I/O
     queue *ended_queue = (queue *)malloc(sizeof(queue));   // fila para processos que ja terminaram sua execucao
     queue_node *current_process = (queue_node *)malloc(sizeof(queue_node));
+    struct timeval current_time;
 
     init_queue(ready_queue);
     init_queue(blocked_queue);
@@ -103,7 +106,7 @@ int main(void)
                 count_io = 0;
             }
             // criando processo na fila de prontos
-            enqueue(ready_queue, process_number, memory_size, info_number, exec_time, pid, io_time, op_order);
+            enqueue(ready_queue, process_number, memory_size, info_number, exec_time, io_time, op_order, start_time, end_time);
 
             // resetando valores
             for (i = 0; i < 5; i++)
@@ -129,20 +132,43 @@ int main(void)
     // dequeue no primeiro processo e verificar primeira operacao
     printf("\nmemoria total: %dKb\nparticoes iniciais: 4 de 4Kb\n", TOTAL_MEMORY);
     printf("time slice de execucao: %d segundos\n", TIME_SLICE);
+
     printf("\n<-Algoritmo First Fit->\n");
     printf("\tparticoes: 2Kb:[%d] 4Kb:[%d] 8Kb:[%d]\n", partitions[0], partitions[1], partitions[2]);
+    gettimeofday(&current_time, NULL);
+    int program_start_time = current_time.tv_sec;
+    printf("\ttempo de inicio do programa: %d\n", program_start_time);
+    printf("\n");
 
     while (count_process_number(ended_queue) != num_processes)
     {
+        // cobrindo caso de ainda existir processo bloqueado mesmo quando todos os outros ja terem terminado
+        if (is_queue_empty(ready_queue))
+        {
+            while (is_queue_empty(ready_queue))
+            {
+                ;
+            }
+        }
+
         // loop para alocar as memorias ate terminar todos os processos
         current_process = dequeue(ready_queue); // pegando processo da fila de prontos
+        gettimeofday(&current_time, NULL);
+        printf("\tprocesso %d selecionado\n", current_process->process_number);
+
+        if (current_process->process_start_time == DEFAULT_VALUE)
+        {
+            printf("\ttempo de inicio da execucao: %ld\n", (current_time.tv_sec));
+            current_process->process_start_time = (current_time.tv_sec);
+        }
+
         printf("\talocando memoria para o processo %d\n", current_process->process_number);
         printf("\tmemoria utilizada pelo processo %d: %dKb\n", current_process->process_number, current_process->memory_size);
         printf("\tbuscando particao para alocar %dKb...\n", current_process->memory_size);
         sleep(1);
 
         // buscando primeira particao que possua o tamanho suficiente de memoria
-        get_partition_size_worst_fit(current_process->memory_size, partitions);
+        get_partition_size_first_fit(current_process->memory_size, partitions);
 
         op_type = get_op_type(current_process); // pegando valor que indica operacao a ser realizada
         printf("\tverificando operacao a ser realizada pelo processo...\n");
@@ -158,7 +184,9 @@ int main(void)
                 printf("\t%d segundos restantes\n", (current_process->exec_time[curr_op_index] - TIME_SLICE));
             }
             else
+            {
                 sleep(TIME_SLICE - current_process->exec_time[curr_op_index]);
+            }
 
             // atualizar tempo restante de execucao
             current_process->exec_time[curr_op_index] -= TIME_SLICE;
@@ -166,11 +194,10 @@ int main(void)
             // verificar se acabou seu tempo de execucao total
             if (current_process->exec_time[curr_op_index] <= 0)
             {
-                printf("\tDEBUG acabou de executar tudo\n");
+                printf("\toperacao exec finalizada\n");
 
                 // como operacao terminou, voltando para valor padrao
                 current_process->exec_time[curr_op_index] = DEFAULT_VALUE;
-
                 for (i = 0; i < 5; i++)
                 {
                     if (current_process->op_order[i] == op_type)
@@ -185,66 +212,120 @@ int main(void)
                 // verifica proxima operacao
                 if (current_process->op_order[next_op_index] == 1) // exec
                 {
-                    printf("\tDEBUG proxima operacao=exec\n");
-                    enqueue(ready_queue, current_process->process_number, current_process->memory_size, current_process->info_number, current_process->exec_time, current_process->pid, current_process->io_time, current_process->op_order);
+
+                    printf("\tproxima operacao=exec\n");
+                    enqueue(ready_queue, current_process->process_number, current_process->memory_size, current_process->info_number, current_process->exec_time, current_process->io_time, current_process->op_order, current_process->process_start_time, current_process->process_end_time);
                 }
                 else if (current_process->op_order[next_op_index] == 2) // io
                 {
-                    printf("\tDEBUG proxima operacao=io\n");
+
+                    printf("\tproxima operacao=io\n");
 
                     printf("\tIO: enviando processo com operacao io para a fila de bloqueados\n");
                     printf("\tIO: processo na fila de bloqueados por %d segundos\n", current_process->io_time[curr_op_index]);
-                    enqueue(blocked_queue, current_process->process_number, current_process->memory_size, current_process->info_number, current_process->exec_time, current_process->pid, current_process->io_time, current_process->op_order);
+                    enqueue(blocked_queue, current_process->process_number, current_process->memory_size, current_process->info_number, current_process->exec_time, current_process->io_time, current_process->op_order, current_process->process_start_time, current_process->process_end_time);
 
                     pthread_t thread_id;
                     thread_args args;
                     args.ready_queue = ready_queue;
                     args.blocked_queue = blocked_queue;
-                    args.current_process = current_process;
                     args.curr_op_index = curr_op_index;
                     args.next_op_index = next_op_index;
 
                     pthread_create(&thread_id, NULL, io_thread_func, (void *)&args);
                 }
 
-                else // terminou todas as operacoes
+                else // terminou todas as operacoes ou operacao seguinte ja foi realizada
                 {
-                    printf("\tDEBUG proxima operacao=nenhuma\n");
-                    enqueue(ended_queue, current_process->process_number, current_process->memory_size, current_process->info_number, current_process->exec_time, current_process->pid, current_process->io_time, current_process->op_order);
-                    printf("prontos:\n");
-                    print_queue(ready_queue);
-                    printf("bloqueados:\n");
-                    print_queue(blocked_queue);
-                    printf("finalizados:\n");
-                    print_queue(ended_queue);
+                    // esse else cobre um caso muito especifico de pular uma operacao io:
+                    // tirando o caso esperado de a operacao seguinte ja ter sido feita
+                    // a variavel remaining_op eh usada junto do for e if seguintes para
+                    // verificar o caso de a operacao seguinte estar feita porem a operacao
+                    // depois dessa nao. Nesse caso o processo seria enviado para a fila de
+                    // finalizados incorretamente e uma operacao ficaria de ser feita no fim
+                    // do programa.
+
+                    // esse caso ocorre com a sequencia de operacoes: io exec io.
+                    int remaining_op = 0;
+                    for (i = 0; i < 5; i++)
+                    {
+                        if (current_process->op_order[i] != -1)
+                        {
+                            remaining_op = 1;
+                        }
+                    }
+                    if (remaining_op == 1)
+                    {
+                        printf("\tainda nao terminou todas as operacoes\n");
+                        enqueue(ready_queue, current_process->process_number, current_process->memory_size, current_process->info_number, current_process->exec_time, current_process->io_time, current_process->op_order, current_process->process_start_time, current_process->process_end_time);
+                    }
+                    else
+                    {
+                        printf("\tfinalizou todas as operacoes\n");
+                        gettimeofday(&current_time, NULL);
+                        printf("\ttempo de fim do processo %d: %ld\n", current_process->process_number, current_time.tv_sec);
+                        current_process->process_end_time = current_time.tv_sec;
+                        printf("\ttempo total de execucao: %d\n", (current_process->process_end_time - current_process->process_start_time));
+                        enqueue(ended_queue, current_process->process_number, current_process->memory_size, current_process->info_number, current_process->exec_time, current_process->io_time, current_process->op_order, current_process->process_start_time, current_process->process_end_time);
+                    }
                 }
             }
 
             // nao acabou tempo total de execucao
             else // mandando para o final da fila de prontos
             {
-                printf("\tDEBUG nao acabou de executar tudo\n");
-                enqueue(ready_queue, current_process->process_number, current_process->memory_size, current_process->info_number, current_process->exec_time, current_process->pid, current_process->io_time, current_process->op_order);
+                printf("\ttempo da operacao exec nao terminou dentro do time slice\n\tfenviando para final da fila\n");
+                enqueue(ready_queue, current_process->process_number, current_process->memory_size, current_process->info_number, current_process->exec_time, current_process->io_time, current_process->op_order, current_process->process_start_time, current_process->process_end_time);
             }
         }
-        // else if (op_type == 2) // io
-        // {
-        //     // mandar processo para a fila de bloqueados pelo tempo do io
-        //     // aqui tambem devo precisar usar fork para deixar em paralelo
-        //     printf("\toperacao io a ser realizada, enviando para a fila de bloqueados por %d segundos", current_process->io_time[get_op_index(current_process, op_type)]);
-        // }
-        else
-            puts("tipo de operacao invalido");
+        else if (op_type == 2) // apenas para caso começar em io
+        {
+            int curr_op_index = get_op_index(current_process, op_type); // index da operacao a ser executada
+            int next_op_index = curr_op_index + 1;
+            printf("\toperacao io a ser realizada, enviando para a fila de bloqueados por %d segundos\n", current_process->io_time[get_op_index(current_process, op_type)]);
+
+            printf("\tIO: processo na fila de bloqueados por %d segundos\n", current_process->io_time[curr_op_index]);
+            enqueue(blocked_queue, current_process->process_number, current_process->memory_size, current_process->info_number, current_process->exec_time, current_process->io_time, current_process->op_order, current_process->process_start_time, current_process->process_end_time);
+
+            pthread_t thread_id;
+            thread_args args;
+            args.ready_queue = ready_queue;
+            args.blocked_queue = blocked_queue;
+            args.curr_op_index = curr_op_index;
+            args.next_op_index = next_op_index;
+
+            pthread_create(&thread_id, NULL, io_thread_func, (void *)&args);
+        }
+        else // caso de ja ter terminado todas as operacoes e o tipo ser -1
+        {
+            printf("\ttodas as instrucoes do processo %d finalizadas\n", current_process->process_number);
+            gettimeofday(&current_time, NULL);
+            printf("\ttempo de fim do processo %d: %ld\n", current_process->process_number, current_time.tv_sec);
+            current_process->process_end_time = current_time.tv_sec;
+            printf("\ttempo total de execucao: %d\n", (current_process->process_end_time - current_process->process_start_time));
+            enqueue(ended_queue, current_process->process_number, current_process->memory_size, current_process->info_number, current_process->exec_time, current_process->io_time, current_process->op_order, current_process->process_start_time, current_process->process_end_time);
+        }
+        printf("\n");
+
+        printf("printf das filas no final:\n");
+        printf("prontos:\n");
+        print_queue(ready_queue);
+        printf("bloqueados:\n");
+        print_queue(blocked_queue);
+        printf("finalizados:\n");
+        print_queue(ended_queue);
+
         printf("\n");
     }
-    printf("execucao dos processos finalizadas\n");
+    printf("execucao dos processos finalizada\n");
     free_queue(ready_queue);
     free_queue(blocked_queue);
     free_queue(ended_queue);
     free(current_process);
 
-    /* adicionar campo na struct de processo indicando a operacao anterior para adicionar prioridade
-    para aqueles que estiverem voltando de io */
+    printf("\n<-Algoritmo Best Fit->\n");
+
+    printf("\n<-Algoritmo Worst Fit->\n");
 
     return 0;
 }
@@ -253,7 +334,7 @@ void init_queue(queue *q) { q->head = NULL, q->tail = NULL; }
 
 int is_queue_empty(queue *q) { return (q->head == NULL); }
 
-void enqueue(queue *q, int process_number, int memory_size, int info_number, int exec_time[], int pid, int io_time[], int op_order[])
+void enqueue(queue *q, int process_number, int memory_size, int info_number, int exec_time[], int io_time[], int op_order[], int process_start_time, int process_end_time)
 {
     queue_node *new_node = (queue_node *)malloc(sizeof(queue_node));
     new_node->process_number = process_number;
@@ -263,13 +344,14 @@ void enqueue(queue *q, int process_number, int memory_size, int info_number, int
     for (int i = 0; i < 5; i++)
         new_node->exec_time[i] = exec_time[i];
 
-    new_node->pid = pid;
-
     for (int i = 0; i < 5; i++)
         new_node->io_time[i] = io_time[i];
 
     for (int i = 0; i < 5; i++)
         new_node->op_order[i] = op_order[i];
+
+    new_node->process_start_time = process_start_time;
+    new_node->process_end_time = process_end_time;
 
     new_node->next = NULL;
 
@@ -315,7 +397,6 @@ void print_queue(queue *q)
         for (int i = 0; i < 5; i++)
             printf("%d ", current->exec_time[i]);
         printf("> ");
-        printf("pid=<%d> ", current->pid);
         printf("io=< ");
         for (int i = 0; i < 5; i++)
             printf("%d ", current->io_time[i]);
@@ -324,7 +405,8 @@ void print_queue(queue *q)
         for (int i = 0; i < 5; i++)
             printf("%d ", current->op_order[i]);
         printf("> ");
-        printf("| ");
+        printf("start_time=<%d> ", current->process_start_time);
+        printf("end_time=<%d> ", current->process_end_time);
         current = current->next;
         printf("\n");
     }
@@ -364,15 +446,15 @@ void get_partition_size_first_fit(int memory_required, int partitions[])
     {
         if (partitions[0] >= 1)
         {
-            printf("alocou :) 2kb de memoria usou 1 particao de 2kb\n");
+            printf("\talocou 2kb de memoria usando 1 particao de 2kb\n");
         }
         else if (partitions[1] >= 1)
         {
-            printf("alocou :) 2kb de memoria usou 1 particao de 4kb\n");
+            printf("\talocou 2kb de memoria usando 1 particao de 4kb\n");
         }
         else if (partitions[2] >= 1)
         {
-            printf("alocou :) 2kb de memoria usou 1 particao de 8kb\n");
+            printf("\talocou 2kb de memoria usando 1 particao de 8kb\n");
         }
     }
 
@@ -380,17 +462,17 @@ void get_partition_size_first_fit(int memory_required, int partitions[])
     {
         if (partitions[1] >= 1)
         {
-            printf("alocou :) 4kb de memoria usou 1 particao de 4kb \n");
+            printf("\talocou 4kb de memoria usando 1 particao de 4kb \n");
         }
         else if (partitions[2] >= 1)
         {
-            printf("alocou :) 4kb de memoria usou 1 particao de 8kb\n");
+            printf("\talocou 4kb de memoria usando 1 particao de 8kb\n");
         }
         else // caso so tenha particao de dois
         {
             partitions[0] -= 2;
             partitions[1] += 1;
-            printf("alocou :) 4kb de memoria usou 2 particoes de 2kb\n");
+            printf("\talocou 4kb de memoria usando 2 particoes de 2kb\n");
         }
     }
 
@@ -398,30 +480,30 @@ void get_partition_size_first_fit(int memory_required, int partitions[])
     {
         if (partitions[2] >= 1)
         {
-            printf("alocou :) 8kb de memoria usou 1 particao de 8kb \n");
+            printf("\talocou 8kb de memoria usando 1 particao de 8kb \n");
         }
         else if (partitions[1] >= 2)
         {
             partitions[1] -= 2;
             partitions[2] += 1;
-            printf("alocou :) 8kb de memoria usou 2 particoes de 4kb\n");
+            printf("\talocou 8kb de memoria usando 2 particoes de 4kb\n");
         }
         else
         {
             partitions[0] -= 4;
             partitions[2] += 1;
-            printf("alocou :) 8kb de memoria usou 4 particoes de 2kb\n");
+            printf("\talocou 8kb de memoria usando 4 particoes de 2kb\n");
         }
     }
     else
     {
 
-        printf("alocou :) 16kb de memoria usou %d particoes de 2kb, %d particoes de 4kb e %d particoes de 8kb \n", partitions[0], partitions[1], partitions[2]);
+        printf("\talocou 16kb de memoria, usou %d particoes de 2kb, %d particoes de 4kb e %d particoes de 8kb \n", partitions[0], partitions[1], partitions[2]);
         partitions[0] = 0;
         partitions[1] = 0;
         partitions[2] = 2;
     }
-    printf("particoes de 2: [%d]; particoes de 4:[%d]; particoes de 8:[%d]\n", partitions[0], partitions[1], partitions[2]);
+    printf("\tparticoes de 2: [%d]; particoes de 4:[%d]; particoes de 8:[%d]\n", partitions[0], partitions[1], partitions[2]);
 }
 
 void get_partition_size_best_fit(int memory_required, int partitions[])
@@ -433,7 +515,7 @@ void get_partition_size_best_fit(int memory_required, int partitions[])
         if (partitions[0] >= 1)
         {
             // otimo joia sucesso
-            printf("alocou :) usou 2Kb ja tinha particao de 2kb\n");
+            printf("\talocou usou 2Kb ja tinha particao de 2kb\n");
         }
         else
         {
@@ -442,7 +524,7 @@ void get_partition_size_best_fit(int memory_required, int partitions[])
                 // quebra 1 de 4 em 2 de 2
                 partitions[1] -= 1;
                 partitions[0] += 2;
-                printf("alocou :) usou 2Kb quebrou 4kb em 2 particoes de 2kb\n");
+                printf("\talocou usou 2Kb quebrou 4kb em 2 particoes de 2kb\n");
             }
             else
             {
@@ -450,7 +532,7 @@ void get_partition_size_best_fit(int memory_required, int partitions[])
                 partitions[2] -= 1; // quebra 1 particao em 2 de 4
                 partitions[1] += 1; // quebra 1 das particoes em 2 de 2
                 partitions[0] += 2;
-                printf("alocou :) usou 2Kb quebrou 8kb em 2 particoes de 2kb\n");
+                printf("\talocou usou 2Kb quebrou 8kb em 2 particoes de 2kb\n");
             }
         }
     }
@@ -461,19 +543,19 @@ void get_partition_size_best_fit(int memory_required, int partitions[])
         // verificar quantidade de particoes de tamanho 4
         if (partitions[1] >= 1)
         {
-            printf("alocou :) usou 4Kb ja tinha particao de 4kb\n");
+            printf("\talocou usou 4Kb ja tinha particao de 4kb\n");
         }
         else if (partitions[2] >= 1)
         {
             partitions[2] -= 1;
             partitions[1] += 2;
-            printf("alocou :) usou 4Kb quebrou 8kb em 2 particoes de 4kb\n");
+            printf("\talocou usou 4Kb quebrou 8kb em 2 particoes de 4kb\n");
         }
         else // juntar particoes de 2 em uma de 4
         {
             partitions[0] -= 2;
             partitions[1] += 1;
-            printf("alocou :) usou 4Kb juntou 2 particoes de 2kb em 1 de 4kb\n");
+            printf("\talocou usou 4Kb juntou 2 particoes de 2kb em 1 de 4kb\n");
         }
     }
 
@@ -484,30 +566,30 @@ void get_partition_size_best_fit(int memory_required, int partitions[])
         if (partitions[2] >= 1)
         {
             // otimo joia sucesso
-            printf("alocou :) usou 8Kb ja tinha particao de 8kb\n");
+            printf("\talocou usou 8Kb ja tinha particao de 8kb\n");
         }
         // verificar quantidade de particoes de tamanho 4
         else if (partitions[1] >= 2)
         {
             partitions[1] -= 2;
             partitions[2] += 1;
-            printf("alocou :) usou 8Kb juntou 2 particoes de 4kb em 1 de 8kb\n");
+            printf("\talocou usou 8Kb juntou 2 particoes de 4kb em 1 de 8kb\n");
         }
         else
         {
             partitions[0] -= 4;
             partitions[2] += 1;
-            printf("alocou :) usou 8Kb juntou 4 particoes de 2kb em 1 de 8kb \n");
+            printf("\talocou usou 8Kb juntou 4 particoes de 2kb em 1 de 8kb \n");
         }
     }
     else
     {
-        printf("alocou :) usou 16kb juntou %d particoes de 2kb, %d particoes de 4kb e %d particoes de 8kb para usar os 16kb\n", partitions[0], partitions[1], partitions[2]);
+        printf("\talocou usou 16kb juntou %d particoes de 2kb, %d particoes de 4kb e %d particoes de 8kb para usar os 16kb\n", partitions[0], partitions[1], partitions[2]);
         partitions[0] = 0;
         partitions[1] = 0;
         partitions[2] = 2;
     }
-    printf("particoes de 2: [%d]; particoes de 4:[%d]; particoes de 8:[%d]\n", partitions[0], partitions[1], partitions[2]);
+    printf("\tparticoes de 2: [%d]; particoes de 4:[%d]; particoes de 8:[%d]\n", partitions[0], partitions[1], partitions[2]);
 }
 
 void get_partition_size_worst_fit(int memory_required, int partitions[])
@@ -598,25 +680,43 @@ void *io_thread_func(void *arg)
 
     queue *ready_queue = args->ready_queue;
     queue *blocked_queue = args->blocked_queue;
-    queue_node *current_process = args->current_process;
     int curr_op_index = args->curr_op_index;
     int next_op_index = args->next_op_index;
 
-    sleep(current_process->io_time[curr_op_index]);
-    printf("\tIO: operacao io terminou, voltando com o processo para a fila de prontos\n");
-    tmp_node = dequeue(blocked_queue);
-
-    tmp_node->io_time[curr_op_index] = DEFAULT_VALUE; // voltando ao valor padrao para nao considerar a mesma operacao novamente
-    for (int i = 0; i < 5; i++)                       // tambem voltando ao valor padrao
+    while (!is_queue_empty(blocked_queue))
     {
-        if (tmp_node->op_order[i] == tmp_node->op_order[next_op_index])
-        {
-            tmp_node->op_order[i] = DEFAULT_VALUE;
-            break;
-        }
-    }
+        tmp_node = dequeue(blocked_queue); // retira processo da fila de bloqueados
+        sleep(tmp_node->io_time[curr_op_index]);
 
-    enqueue(ready_queue, tmp_node->process_number, tmp_node->memory_size, tmp_node->info_number, tmp_node->exec_time, tmp_node->pid, tmp_node->io_time, tmp_node->op_order);
+        printf("\tIO: operacao io do processo %d terminou, voltando com o processo para a fila de prontos\n", tmp_node->process_number);
+
+        tmp_node->io_time[curr_op_index] = DEFAULT_VALUE; // voltando ao valor padrao para nao considerar a mesma operacao novamente
+        if (tmp_node->op_order[curr_op_index] == 2)       // entao a operacao atual eh io (comeca em io ou operacoes io seguidas)
+        {
+            for (int i = 0; i < 5; i++) // tambem voltando ao valor padrao
+            {
+                if (tmp_node->op_order[i] == tmp_node->op_order[curr_op_index])
+                {
+                    tmp_node->op_order[i] = DEFAULT_VALUE;
+                    break;
+                }
+            }
+        }
+
+        else // entao eh o caso da operacao seguinte ser io e a atual exec
+        {
+            for (int i = 0; i < 5; i++) // tambem voltando ao valor padrao
+            {
+                if (tmp_node->op_order[i] == tmp_node->op_order[next_op_index])
+                {
+                    tmp_node->op_order[i] = DEFAULT_VALUE;
+                    break;
+                }
+            }
+        }
+
+        enqueue(ready_queue, tmp_node->process_number, tmp_node->memory_size, tmp_node->info_number, tmp_node->exec_time, tmp_node->io_time, tmp_node->op_order, tmp_node->process_start_time, tmp_node->process_end_time);
+    }
 
     pthread_exit(NULL);
 }
