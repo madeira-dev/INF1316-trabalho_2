@@ -57,8 +57,16 @@ int get_op_type(queue_node *current_process);
 int get_op_index(queue_node *current_process, int op_type);
 void *io_thread_func(void *arg);
 
-int main(void)
+int main(int argc, char *argv[])
 {
+    if (argc < 2)
+    {
+        printf("informe qual algoritmo deseja utilizar\n");
+        printf("0->first fit\n1->best fit\n2->worst fit\n");
+        return 1;
+    }
+    int argument = atoi(argv[1]);
+
     FILE *file_ptr;
     char c;
     int num_processes, process_number, memory_size, info_number;
@@ -133,7 +141,17 @@ int main(void)
     printf("\nmemoria total: %dKb\nparticoes iniciais: 4 de 4Kb\n", TOTAL_MEMORY);
     printf("time slice de execucao: %d segundos\n", TIME_SLICE);
 
-    printf("\n<-Algoritmo First Fit->\n");
+    if (argument == 0) // first fit
+        printf("\n<-Algoritmo First Fit->\n");
+    else if (argument == 1) // best fit
+        printf("\n<-Algoritmo Best Fit->\n");
+    else if (argument == 2) // worst fit
+        printf("\n<-Algoritmo Worst Fit->\n");
+    else
+    {
+        printf("valor invalido para selecionar algoritmo\n0->first fit\n1->best fit\n2->worst fit\n");
+        exit(1);
+    }
     printf("\tparticoes: 2Kb:[%d] 4Kb:[%d] 8Kb:[%d]\n", partitions[0], partitions[1], partitions[2]);
     gettimeofday(&current_time, NULL);
     int program_start_time = current_time.tv_sec;
@@ -167,8 +185,12 @@ int main(void)
         printf("\tbuscando particao para alocar %dKb...\n", current_process->memory_size);
         sleep(1);
 
-        // buscando primeira particao que possua o tamanho suficiente de memoria
-        get_partition_size_first_fit(current_process->memory_size, partitions);
+        if (argument == 0) // first fit
+            get_partition_size_first_fit(current_process->memory_size, partitions);
+        else if (argument == 1) // best fit
+            get_partition_size_best_fit(current_process->memory_size, partitions);
+        else if (argument == 2) // worst fit
+            get_partition_size_worst_fit(current_process->memory_size, partitions);
 
         op_type = get_op_type(current_process); // pegando valor que indica operacao a ser realizada
         printf("\tverificando operacao a ser realizada pelo processo...\n");
@@ -322,10 +344,6 @@ int main(void)
     free_queue(blocked_queue);
     free_queue(ended_queue);
     free(current_process);
-
-    printf("\n<-Algoritmo Best Fit->\n");
-
-    printf("\n<-Algoritmo Worst Fit->\n");
 
     return 0;
 }
@@ -598,7 +616,7 @@ void get_partition_size_worst_fit(int memory_required, int partitions[])
     {
         if (partitions[2] >= 1)
         {
-            printf("usou 8kb ja tinha uma particao de 8kb\n");
+            printf("\tusou 8kb ja tinha uma particao de 8kb\n");
         }
         else
         {
@@ -609,13 +627,13 @@ void get_partition_size_worst_fit(int memory_required, int partitions[])
             {
                 partitions[0] -= 4; // diminui 8 Kb das particoes de 2
                 partitions[2] += 1; // aumenta 8 Kb nas particoes de 8
-                printf("usou 8kb juntou 4 particoes de 2kb\n");
+                printf("\tusou 8kb juntou 4 particoes de 2kb\n");
             }
             else if (partition_4_in_use * 4 >= 8)
             {
                 partitions[1] -= 2; // diminui 8 Kb das particoes de 4
                 partitions[2] += 1; // aumenta 8 Kb nas particoes de 8
-                printf("usou 8kb juntou 2 particoes de 4kb\n");
+                printf("\tusou 8kb juntou 2 particoes de 4kb\n");
             }
         }
     }
@@ -623,17 +641,17 @@ void get_partition_size_worst_fit(int memory_required, int partitions[])
     {
         if (partitions[2] == 2)
         {
-            printf("usou 16kb ja tinham 2 particoes de 8kb\n");
+            printf("\tusou 16kb ja tinham 2 particoes de 8kb\n");
         }
         else
         {
-            printf("usou 16kb juntou %d particoes de 2kb, %d particoes de 4kb e %d particoes de 8kb para usar 16kb\n", partitions[0], partitions[1], partitions[2]);
+            printf("\tusou 16kb juntou %d particoes de 2kb, %d particoes de 4kb e %d particoes de 8kb para usar 16kb\n", partitions[0], partitions[1], partitions[2]);
             partitions[0] = 0;
             partitions[1] = 0;
             partitions[2] = 2;
         }
     }
-    printf("particoes de 2: [%d]; particoes de 4:[%d]; particoes de 8:[%d]\n", partitions[0], partitions[1], partitions[2]);
+    printf("\tparticoes de 2: [%d]; particoes de 4:[%d]; particoes de 8:[%d]\n", partitions[0], partitions[1], partitions[2]);
 }
 
 int get_op_type(queue_node *current_process)
